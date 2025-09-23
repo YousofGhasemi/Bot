@@ -1,7 +1,13 @@
 import logging
-import html
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 from telegram.constants import ParseMode
 import config
 import parser as tx_parser
@@ -17,40 +23,38 @@ if not BOT_TOKEN or BOT_TOKEN.startswith("PUT_YOUR"):
 
 
 def format_number(n: int) -> str:
-    # جداکننده هزار با کاما (پیکربندی در config)
     return f"{n:,}"
 
 
-def reply_with_balance(bot, chat_id: int, reply_to_message_id: int, asset: str):
+async def reply_with_balance(bot, chat_id: int, reply_to_message_id: int, asset: str):
     bal = db.get_balance(asset)
     text = f"موجودی {asset} : {format_number(bal)}"
-    bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_message_id)
+    await bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to_message_id)
 
 
-def cmd_start(update, context):
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = "ربات ثبت ورود/خروج فعال شد. برای مشاهده‌ی جدول کلی موجودی‌ها دکمه را بزنید."
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("موجودی لحظه‌ای", callback_data="show_balances")]])
     if update.message:
-        update.message.reply_text(txt, reply_markup=kb)
+        await update.message.reply_text(txt, reply_markup=kb)
     else:
-        update.effective_chat.send_message(txt, reply_markup=kb)
+        await update.effective_chat.send_message(txt, reply_markup=kb)
 
 
-def cmd_balance(update, context):
-    # این دستور جدول کلی را می‌فرستد
-    send_balances_callback(update.effective_chat.id, context.bot, update.message)
+async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_balances_callback(update.effective_chat.id, context.bot, update.message)
 
 
-def send_balances_callback(chat_id, bot, reply_message=None):
+async def send_balances_callback(chat_id, bot, reply_message=None):
     totals = db.get_report_table()
     if not totals:
         text = "هنوز تراکنشی ثبت نشده."
         if reply_message:
-            reply_message.reply_text(text)
+            await reply_message.reply_text(text)
         else:
-            bot.send_message(chat_id=chat_id, text=text)
+            await bot.send_message(chat_id=chat_id, text=text)
         return
-    # تولید جدول: برای هر دارایی دو ردیف: (ردیف اول: اسم دارایی) / (ردیف دوم: ورود | خروج)
+
     lines = []
     for asset, vals in totals.items():
         line_header = f"*{asset}*"
@@ -58,20 +62,21 @@ def send_balances_callback(chat_id, bot, reply_message=None):
         lines.append(line_header)
         lines.append(line_data)
     text = "\n".join(lines)
+
     if reply_message:
-        reply_message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await reply_message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
     else:
-        bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
 
 
-def callback_query_handler(update, context):
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     if data == "show_balances":
         totals = db.get_report_table()
         if not totals:
-            query.answer()
-            query.message.reply_text("هنوز تراکنشی ثبت نشده.")
+            await query.answer()
+            await query.message.reply_text("هنوز تراکنشی ثبت نشده.")
             return
         lines = []
         for asset, vals in totals.items():
@@ -80,14 +85,13 @@ def callback_query_handler(update, context):
             lines.append(line_header)
             lines.append(line_data)
         text = "\n".join(lines)
-        query.answer()
-        query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await query.answer()
+        await query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
     else:
-        query.answer()
+        await query.answer()
 
 
-def handle_new_message(update, context):
-    # پیام جدید در گروه دریافت شد
+async def handle_new_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message is None or update.message.text is None:
         return
     chat_id = update.effective_chat.id
@@ -97,15 +101,12 @@ def handle_new_message(update, context):
     if not parsed:
         return
     added = db.add_transaction(chat_id, msg_id, parsed)
-    # حتی اگر قبلاً وجود داشت؛ برای اطمینان دوباره reply بزن
-    reply_with_balance(context.bot, chat_id, msg_id, parsed["asset"])
+    await reply_with_balance(context.bot, chat_id, msg_id, parsed["asset"])
     logger.info("Added tx: chat=%s msg=%s parsed=%s added=%s", chat_id, msg_id, parsed, added)
 
 
-def handle_edited_message(update, context):
-    # پیام ویرایش شد؛ update.edited_message یا update.message ممکن است داشته باشیم بسته به نسخه
-    # در اینجا هر دو حالت را بررسی می‌کنیم.
-    msg = update.edited_message if hasattr(update, "edited_message") and update.edited_message else update.message
+async def handle_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.edited_message if update.edited_message else update.message
     if msg is None or msg.text is None:
         return
     chat_id = update.effective_chat.id
@@ -113,26 +114,12 @@ def handle_edited_message(update, context):
     text = msg.text
     parsed = tx_parser.parse_message(text)
     if not parsed:
-        # اگر پارسر نتواند چیزی بخواند، احتمالاً می‌خواهیم اگر قبل رکوردی وجود داشت آن را حذف کنیم
-        # اما برای احتیاط این کار را انجام نمی‌کنیم؛ بهتر است رفتار حذف را صریح نگه داریم.
         return
     updated = db.update_transaction(chat_id, msg_id, parsed)
-    reply_with_balance(context.bot, chat_id, msg_id, parsed["asset"])
+    await reply_with_balance(context.bot, chat_id, msg_id, parsed["asset"])
     logger.info("Updated tx: chat=%s msg=%s parsed=%s updated=%s", chat_id, msg_id, parsed, updated)
 
 
-# --- Telethon (اختیاری) برای دریافت حذف پیام ---
-# توضیح: Bot API معمولاً حذف پیام‌ها را به بات اطلاع نمی‌دهد. اگر نیاز دارید پیام‌های حذف شده
-# هم در سابقه حذف شوند، می‌توانید یک userbot (Telethon) همزمان اجرا کنید که حذف پیام را می‌شنود
-# و سپس db.remove_transaction را صدا بزند.
-#
-# برای فعال‌سازی:
-# - TELETHON_ENABLE = True در config.py
-# - TELETHON_API_ID و TELETHON_API_HASH را پر کنید
-# - هنگام اجرای برای اولین بار، یک session ساخته خواهد شد (احراز هویت توسط شماره‌ی موبایل)
-#
-# توجه: استفاده از userbot یعنی شما از حساب شخصی استفاده می‌کنید و این راه‌حل نیازمند
-# آگاهی از مسائل امنیتی/قوانین تلگرام است.
 def run_telethon_listener():
     if not config.TELETHON_ENABLE:
         return
@@ -154,13 +141,10 @@ def run_telethon_listener():
 
     @client.on(events.MessageDeleted)
     async def handler(event):
-        # event.deleted_ids: dict از chat_id -> [message_ids]
-        # حذف هر پیام را در دیتابیس پاک کن
         for chat_id, ids in event.deleted_ids.items():
             for mid in ids:
                 removed = db.remove_transaction(chat_id, mid)
                 logger.info("Telethon: removed tx for chat=%s msg=%s removed=%s", chat_id, mid, removed)
-                # در صورت نیاز می‌توان اینجا پیام اطلاع‌رسانی هم فرستاد (اختیاری)
 
     logger.info("Starting Telethon listener (برای دریافت حذف پیام‌ها)...")
     client.start()
@@ -168,28 +152,21 @@ def run_telethon_listener():
 
 
 def main():
-    updater = Updater(token=BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", cmd_start))
-    dp.add_handler(CommandHandler("balance", cmd_balance))
-    dp.add_handler(CallbackQueryHandler(callback_query_handler))
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("balance", cmd_balance))
+    application.add_handler(CallbackQueryHandler(callback_query_handler))
 
-    # پیام جدید
-    dp.add_handler(MessageHandler(filters.text & filters.group, handle_new_message))
-    # پیام ویرایش شده - در برخی نسخه‌ها باید edited_updates=True ست شود؛ این کتابخانه معمولاً
-    # ویرایش‌ها را با همین Handler هم می‌فرستد. اگر دریافت نمی‌شود، در مستندات نسخه‌ی مورد استفاده
-    # پارامتر مربوطه را فعال کنید.
-    dp.add_handler(MessageHandler(filters.text & filters.group, handle_edited_message))
+    application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, handle_new_message))
+    application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, handle_edited_message))
 
-    # Telethon را در یک ترد جدا اجرا کن (اختیاری)
     if config.TELETHON_ENABLE:
         t = threading.Thread(target=run_telethon_listener, daemon=True)
         t.start()
 
-    updater.start_polling()
     logger.info("Bot started. Polling...")
-    updater.idle()
+    application.run_polling()
 
 
 if __name__ == "__main__":

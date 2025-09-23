@@ -39,10 +39,6 @@ def _ensure_asset_struct(db: dict, asset: str):
 
 
 def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
-    """
-    اضافه کردن تراکنش جدید؛ اگر تراکنش با همین ماتریال (chat_id:message_id) موجود باشد،
-    False برمی‌گرداند.
-    """
     key = f"{chat_id}:{message_id}"
     db = _read_db()
     if key in db["transactions"]:
@@ -51,11 +47,10 @@ def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
     amount = int(tx["amount"])
     direction = tx["direction"]
     _ensure_asset_struct(db, asset)
-    # اعمال مقدار روی موجودی و totals
-    if direction == "و":  # ورود => اضافه
+    if direction == "و":
         db["balances"][asset] += amount
         db["totals"][asset]["in"] += amount
-    else:  # 'خ' => خروج => کم
+    else:
         db["balances"][asset] -= amount
         db["totals"][asset]["out"] += amount
     tx_rec = tx.copy()
@@ -70,9 +65,6 @@ def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
 
 
 def remove_transaction(chat_id: int, message_id: int) -> bool:
-    """
-    حذف تراکنش از ثبت (مثلاً وقتی پیام حذف شد). اگر وجود نداشت False برمی‌گرداند.
-    """
     key = f"{chat_id}:{message_id}"
     db = _read_db()
     if key not in db["transactions"]:
@@ -82,7 +74,6 @@ def remove_transaction(chat_id: int, message_id: int) -> bool:
     amount = int(tx["amount"])
     direction = tx["direction"]
     _ensure_asset_struct(db, asset)
-    # معکوس کردن اثر تراکنش
     if direction == "و":
         db["balances"][asset] -= amount
         db["totals"][asset]["in"] -= amount
@@ -94,15 +85,10 @@ def remove_transaction(chat_id: int, message_id: int) -> bool:
 
 
 def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
-    """
-    ویرایش تراکنش: اگر رکورد قبلاً وجود داشته باشد، اثر قبلی را برمی‌دارد و اثر جدید را می‌زند.
-    در صورت نبود رکورد سابق، رفتار معادل add_transaction انجام می‌دهد.
-    """
     key = f"{chat_id}:{message_id}"
     db = _read_db()
     if key in db["transactions"]:
         old = db["transactions"][key]
-        # معکوس کردن اثر قدیمی
         old_asset = old["asset"]
         old_amount = int(old["amount"])
         old_dir = old["direction"]
@@ -113,7 +99,6 @@ def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
         else:
             db["balances"][old_asset] += old_amount
             db["totals"][old_asset]["out"] -= old_amount
-    # سپس اضافه کردن نسخه جدید
     asset = new_tx["asset"]
     amount = int(new_tx["amount"])
     direction = new_tx["direction"]
@@ -146,10 +131,6 @@ def get_all_balances() -> Dict[str, int]:
 
 
 def get_report_table() -> Dict[str, Dict[str, int]]:
-    """
-    برمی‌گرداند dict با ساختار:
-    { asset: {"in": total_in, "out": total_out}, ... }
-    """
     db = _read_db()
     return db.get("totals", {}).copy()
 
