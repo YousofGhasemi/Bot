@@ -1,7 +1,9 @@
 import logging
 import html
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
+from telegram.constants import ParseMode
+
 import config
 import parser as tx_parser
 import db
