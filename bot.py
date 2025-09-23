@@ -1,9 +1,8 @@
 import logging
 import html
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from telegram.constants import ParseMode
-
 import config
 import parser as tx_parser
 import db
@@ -177,11 +176,11 @@ def main():
     dp.add_handler(CallbackQueryHandler(callback_query_handler))
 
     # پیام جدید
-    dp.add_handler(MessageHandler(Filters.text & Filters.group, handle_new_message))
+    dp.add_handler(MessageHandler(filters.text & filters.group, handle_new_message))
     # پیام ویرایش شده - در برخی نسخه‌ها باید edited_updates=True ست شود؛ این کتابخانه معمولاً
     # ویرایش‌ها را با همین Handler هم می‌فرستد. اگر دریافت نمی‌شود، در مستندات نسخه‌ی مورد استفاده
     # پارامتر مربوطه را فعال کنید.
-    dp.add_handler(MessageHandler(Filters.text & Filters.group, handle_edited_message))
+    dp.add_handler(MessageHandler(filters.text & filters.group, handle_edited_message))
 
     # Telethon را در یک ترد جدا اجرا کن (اختیاری)
     if config.TELETHON_ENABLE:
