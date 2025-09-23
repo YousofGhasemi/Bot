@@ -29,7 +29,7 @@
 ## 📦 نصب و راه‌اندازی
 1. ریپازیتوری را کلون کنید:
 ```
-   git clone https://github.com/your-username/telegram-fund-bot.git
+   git clone https://github.com/YousofGhasemi/telegram-fund-bot.git
    cd telegram-fund-bot
 ```
 2.محیط مجازی بسازید و پکیج‌ها را نصب کنید:
