@@ -79,7 +79,7 @@ def parse_message(text: str) -> Optional[Dict]:
         return None
     orig = text.strip()
     s = re.sub(r'\s+', ' ', orig.replace("\n", " ")).strip()
-    dir_match = re.search(r'(?<=\s|^)([وخ])(?=\s)', s) or re.search(r'(?<=\s|^)([وخ])(?=$|[:\-])', s)
+    dir_match = re.search(r'(?:^|\s)([وخ])(?=\s|$|[:\-])', s)
     if not dir_match:
         return None
     direction = dir_match.group(1)

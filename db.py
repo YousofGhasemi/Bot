@@ -5,29 +5,37 @@ from filelock import FileLock
 import config
 from typing import Optional, Dict
 
-_DB_PATH = config.DB_PATH
-_LOCK_PATH = _DB_PATH + ".lock"
-os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
+os.makedirs(config.DB_DIR, exist_ok=True)
+
+
+def _db_path(chat_id: int) -> str:
+    return os.path.join(config.DB_DIR, f"group_{chat_id}.json")
+
+
+def _lock_path(chat_id: int) -> str:
+    return _db_path(chat_id) + ".lock"
 
 
 def _default_db():
     return {"balances": {}, "totals": {}, "transactions": {}}
 
 
-def _read_db() -> dict:
-    if not os.path.exists(_DB_PATH):
+def _read_db(chat_id: int) -> dict:
+    path = _db_path(chat_id)
+    if not os.path.exists(path):
         return _default_db()
-    with FileLock(_LOCK_PATH):
-        with open(_DB_PATH, "r", encoding="utf-8") as f:
+    with FileLock(_lock_path(chat_id)):
+        with open(path, "r", encoding="utf-8") as f:
             try:
                 return json.load(f)
             except Exception:
                 return _default_db()
 
 
-def _write_db(db: dict):
-    with FileLock(_LOCK_PATH):
-        with open(_DB_PATH, "w", encoding="utf-8") as f:
+def _write_db(chat_id: int, db: dict):
+    path = _db_path(chat_id)
+    with FileLock(_lock_path(chat_id)):
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(db, f, ensure_ascii=False, indent=2)
 
 
@@ -39,8 +47,8 @@ def _ensure_asset_struct(db: dict, asset: str):
 
 
 def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
-    key = f"{chat_id}:{message_id}"
-    db = _read_db()
+    key = str(message_id)
+    db = _read_db(chat_id)
     if key in db["transactions"]:
         return False
     asset = tx["asset"]
@@ -60,13 +68,13 @@ def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
         "ts": int(time.time())
     })
     db["transactions"][key] = tx_rec
-    _write_db(db)
+    _write_db(chat_id, db)
     return True
 
 
 def remove_transaction(chat_id: int, message_id: int) -> bool:
-    key = f"{chat_id}:{message_id}"
-    db = _read_db()
+    key = str(message_id)
+    db = _read_db(chat_id)
     if key not in db["transactions"]:
         return False
     tx = db["transactions"].pop(key)
@@ -80,13 +88,13 @@ def remove_transaction(chat_id: int, message_id: int) -> bool:
     else:
         db["balances"][asset] += amount
         db["totals"][asset]["out"] -= amount
-    _write_db(db)
+    _write_db(chat_id, db)
     return True
 
 
 def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
-    key = f"{chat_id}:{message_id}"
-    db = _read_db()
+    key = str(message_id)
+    db = _read_db(chat_id)
     if key in db["transactions"]:
         old = db["transactions"][key]
         old_asset = old["asset"]
@@ -108,7 +116,7 @@ def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
         db["totals"][asset]["in"] += amount
     else:
         db["balances"][asset] -= amount
-        db["totals"][asset]["out"] += amount
+        db["totals"][asset]["out"] -= amount
     new_rec = new_tx.copy()
     new_rec.update({
         "chat_id": chat_id,
@@ -116,25 +124,25 @@ def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
         "ts": int(time.time())
     })
     db["transactions"][key] = new_rec
-    _write_db(db)
+    _write_db(chat_id, db)
     return True
 
 
-def get_balance(asset: str) -> int:
-    db = _read_db()
+def get_balance(chat_id: int, asset: str) -> int:
+    db = _read_db(chat_id)
     return int(db.get("balances", {}).get(asset, 0))
 
 
-def get_all_balances() -> Dict[str, int]:
-    db = _read_db()
+def get_all_balances(chat_id: int) -> Dict[str, int]:
+    db = _read_db(chat_id)
     return db.get("balances", {}).copy()
 
 
-def get_report_table() -> Dict[str, Dict[str, int]]:
-    db = _read_db()
+def get_report_table(chat_id: int) -> Dict[str, Dict[str, int]]:
+    db = _read_db(chat_id)
     return db.get("totals", {}).copy()
 
 
-def get_transaction(key: str) -> Optional[Dict]:
-    db = _read_db()
-    return db.get("transactions", {}).get(key)
+def get_transaction(chat_id: int, message_id: int) -> Optional[Dict]:
+    db = _read_db(chat_id)
+    return db.get("transactions", {}).get(str(message_id))
