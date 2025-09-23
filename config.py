@@ -18,5 +18,5 @@ TELETHON_SESSION_NAME = "user_session"
 # لیست آی‌دی ادمین‌ها (اختیاری)
 ADMIN_IDS = []
 
-# فرمت نمایش اعداد
+# فرمت نمایش اعداد (در حال حاضر از کاما استفاده شده)
 THOUSAND_SEPARATOR = ","

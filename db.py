@@ -17,7 +17,12 @@ def _lock_path(chat_id: int) -> str:
 
 
 def _default_db():
-    return {"balances": {}, "totals": {}, "transactions": {}}
+    return {
+        "confirmed_balance": {},   # مانده تاییدشده (baseline)
+        "totals": {},              # { asset: {"in": 0, "out": 0} }
+        "transactions": {},        # { message_id_str: tx_rec }
+        "dashboard_message_id": None
+    }
 
 
 def _read_db(chat_id: int) -> dict:
@@ -40,26 +45,41 @@ def _write_db(chat_id: int, db: dict):
 
 
 def _ensure_asset_struct(db: dict, asset: str):
-    if asset not in db["balances"]:
-        db["balances"][asset] = 0
+    if "totals" not in db:
+        db["totals"] = {}
     if asset not in db["totals"]:
         db["totals"][asset] = {"in": 0, "out": 0}
+    if "confirmed_balance" not in db:
+        db["confirmed_balance"] = {}
+    if asset not in db["confirmed_balance"]:
+        db["confirmed_balance"][asset] = 0
 
 
+# -- Dashboard message id helpers
+def set_dashboard_message_id(chat_id: int, message_id: Optional[int]):
+    db = _read_db(chat_id)
+    db["dashboard_message_id"] = message_id
+    _write_db(chat_id, db)
+
+
+def get_dashboard_message_id(chat_id: int) -> Optional[int]:
+    db = _read_db(chat_id)
+    return db.get("dashboard_message_id")
+
+
+# -- Transaction operations (affect totals only)
 def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
     key = str(message_id)
     db = _read_db(chat_id)
-    if key in db["transactions"]:
+    if key in db.get("transactions", {}):
         return False
     asset = tx["asset"]
     amount = int(tx["amount"])
     direction = tx["direction"]
     _ensure_asset_struct(db, asset)
     if direction == "و":
-        db["balances"][asset] += amount
         db["totals"][asset]["in"] += amount
     else:
-        db["balances"][asset] -= amount
         db["totals"][asset]["out"] += amount
     tx_rec = tx.copy()
     tx_rec.update({
@@ -75,7 +95,7 @@ def add_transaction(chat_id: int, message_id: int, tx: Dict) -> bool:
 def remove_transaction(chat_id: int, message_id: int) -> bool:
     key = str(message_id)
     db = _read_db(chat_id)
-    if key not in db["transactions"]:
+    if key not in db.get("transactions", {}):
         return False
     tx = db["transactions"].pop(key)
     asset = tx["asset"]
@@ -83,10 +103,8 @@ def remove_transaction(chat_id: int, message_id: int) -> bool:
     direction = tx["direction"]
     _ensure_asset_struct(db, asset)
     if direction == "و":
-        db["balances"][asset] -= amount
         db["totals"][asset]["in"] -= amount
     else:
-        db["balances"][asset] += amount
         db["totals"][asset]["out"] -= amount
     _write_db(chat_id, db)
     return True
@@ -95,28 +113,26 @@ def remove_transaction(chat_id: int, message_id: int) -> bool:
 def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
     key = str(message_id)
     db = _read_db(chat_id)
-    if key in db["transactions"]:
+    # revert old if exists
+    if key in db.get("transactions", {}):
         old = db["transactions"][key]
         old_asset = old["asset"]
         old_amount = int(old["amount"])
         old_dir = old["direction"]
         _ensure_asset_struct(db, old_asset)
         if old_dir == "و":
-            db["balances"][old_asset] -= old_amount
             db["totals"][old_asset]["in"] -= old_amount
         else:
-            db["balances"][old_asset] += old_amount
             db["totals"][old_asset]["out"] -= old_amount
+    # apply new
     asset = new_tx["asset"]
     amount = int(new_tx["amount"])
     direction = new_tx["direction"]
     _ensure_asset_struct(db, asset)
     if direction == "و":
-        db["balances"][asset] += amount
         db["totals"][asset]["in"] += amount
     else:
-        db["balances"][asset] -= amount
-        db["totals"][asset]["out"] -= amount
+        db["totals"][asset]["out"] += amount
     new_rec = new_tx.copy()
     new_rec.update({
         "chat_id": chat_id,
@@ -128,21 +144,50 @@ def update_transaction(chat_id: int, message_id: int, new_tx: Dict) -> bool:
     return True
 
 
-def get_balance(chat_id: int, asset: str) -> int:
-    db = _read_db(chat_id)
-    return int(db.get("balances", {}).get(asset, 0))
-
-
-def get_all_balances(chat_id: int) -> Dict[str, int]:
-    db = _read_db(chat_id)
-    return db.get("balances", {}).copy()
-
-
+# -- Reporting / balances
 def get_report_table(chat_id: int) -> Dict[str, Dict[str, int]]:
     db = _read_db(chat_id)
     return db.get("totals", {}).copy()
 
 
+def get_confirmed_balances(chat_id: int) -> Dict[str, int]:
+    db = _read_db(chat_id)
+    return db.get("confirmed_balance", {}).copy()
+
+
+def get_balance(chat_id: int, asset: str) -> int:
+    db = _read_db(chat_id)
+    _ensure_asset_struct(db, asset)
+    confirmed = int(db.get("confirmed_balance", {}).get(asset, 0))
+    totals = db.get("totals", {}).get(asset, {"in": 0, "out": 0})
+    return confirmed + int(totals.get("in", 0)) - int(totals.get("out", 0))
+
+
+def get_all_balances(chat_id: int) -> Dict[str, int]:
+    db = _read_db(chat_id)
+    assets = set(db.get("confirmed_balance", {}).keys()) | set(db.get("totals", {}).keys())
+    out = {}
+    for a in assets:
+        out[a] = get_balance(chat_id, a)
+    return out
+
+
 def get_transaction(chat_id: int, message_id: int) -> Optional[Dict]:
     db = _read_db(chat_id)
     return db.get("transactions", {}).get(str(message_id))
+
+
+# -- Confirm day: set confirmed_balance = current, zero totals, clear transactions
+def confirm_day(chat_id: int):
+    db = _read_db(chat_id)
+    totals = db.get("totals", {})
+    confirmed = db.get("confirmed_balance", {})
+    assets = set(confirmed.keys()) | set(totals.keys())
+    for asset in assets:
+        _ensure_asset_struct(db, asset)
+        cur = confirmed.get(asset, 0) + totals.get(asset, {}).get("in", 0) - totals.get(asset, {}).get("out", 0)
+        db["confirmed_balance"][asset] = int(cur)
+        db["totals"][asset] = {"in": 0, "out": 0}
+    # clear transactions (we consider them archived/consumed on confirm)
+    db["transactions"] = {}
+    _write_db(chat_id, db)

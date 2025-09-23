@@ -79,6 +79,7 @@ def parse_message(text: str) -> Optional[Dict]:
         return None
     orig = text.strip()
     s = re.sub(r'\s+', ' ', orig.replace("\n", " ")).strip()
+    # فیکس lookbehind: سازگار با Python 3.13
     dir_match = re.search(r'(?:^|\s)([وخ])(?=\s|$|[:\-])', s)
     if not dir_match:
         return None
